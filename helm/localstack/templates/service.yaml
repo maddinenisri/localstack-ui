@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "localstack.fullname" . }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "localstack.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: ui
+      port: {{ .Values.service.uiPort }}
+      targetPort: http
+      protocol: TCP
+    - name: localstack
+      port: {{ .Values.service.localstackPort }}
+      targetPort: gateway
+      protocol: TCP
+  selector:
+    {{- include "localstack.selectorLabels" . | nindent 4 }}

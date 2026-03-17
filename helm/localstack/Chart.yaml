@@ -1,0 +1,6 @@
+apiVersion: v2
+name: localstack
+description: LocalStack with SES/SNS Inspector UI sidecar
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

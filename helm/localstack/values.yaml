@@ -1,0 +1,60 @@
+localstack:
+  image:
+    repository: localstack/localstack
+    tag: latest
+    pullPolicy: IfNotPresent
+  services: "ses,sns"
+  debug: "0"
+  persistence:
+    enabled: false
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+ui:
+  image:
+    repository: your-dockerhub-user/localstack-ui
+    tag: latest
+    pullPolicy: Always
+  port: 8080
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+service:
+  type: ClusterIP
+  localstackPort: 4566
+  uiPort: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: localstack.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
