@@ -35,6 +35,9 @@ data:
             proxy_set_header   Host              localhost;
             proxy_set_header   X-Real-IP         $remote_addr;
             proxy_set_header   Connection        "";
+            # Strip Origin/Referer — LocalStack rejects browser requests with these set
+            proxy_set_header   Origin            "";
+            proxy_set_header   Referer           "";
 
             # Short timeouts — if LocalStack is down we want a fast, clean error
             # back to the UI rather than a hanging request.
@@ -49,6 +52,54 @@ data:
 
             add_header Access-Control-Allow-Origin  * always;
             add_header Access-Control-Allow-Methods "GET, DELETE, OPTIONS" always;
+            add_header Access-Control-Allow-Headers "Content-Type" always;
+
+            if ($request_method = OPTIONS) {
+                return 204;
+            }
+        }
+
+        location /_localstack/ {
+            proxy_pass         http://localstack;
+            proxy_http_version 1.1;
+            proxy_set_header   Host              localhost;
+            proxy_set_header   Connection        "";
+            proxy_set_header   Origin            "";
+            proxy_set_header   Referer           "";
+
+            proxy_connect_timeout 2s;
+            proxy_read_timeout    10s;
+
+            proxy_intercept_errors on;
+            error_page 502 503 504 = @localstack_unavailable;
+
+            add_header Access-Control-Allow-Origin  * always;
+            add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
+            add_header Access-Control-Allow-Headers "Content-Type" always;
+
+            if ($request_method = OPTIONS) {
+                return 204;
+            }
+        }
+
+        # Proxy standard AWS API calls (SNS, SQS) to LocalStack.
+        location ~ ^/_aws_api/([^/]+)/(.*) {
+            proxy_pass         http://localstack/$2?$args;
+            proxy_http_version 1.1;
+            proxy_set_header   Host              $1.us-east-1.localhost.localstack.cloud;
+            proxy_set_header   Connection        "";
+            proxy_set_header   Origin            "";
+            proxy_set_header   Referer           "";
+
+            proxy_connect_timeout 2s;
+            proxy_read_timeout    10s;
+            proxy_send_timeout    10s;
+
+            proxy_intercept_errors on;
+            error_page 502 503 504 = @localstack_unavailable;
+
+            add_header Access-Control-Allow-Origin  * always;
+            add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
             add_header Access-Control-Allow-Headers "Content-Type" always;
 
             if ($request_method = OPTIONS) {

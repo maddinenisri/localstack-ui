@@ -24,11 +24,17 @@ function EmailDetail({ msg, onClose }: { msg: SesMessage; onClose: () => void })
             <span className="text-gray-500">From:</span> {msg.Source}
           </p>
           <p>
-            <span className="text-gray-500">To:</span> {msg.Destination.ToAddresses.join(', ')}
+            <span className="text-gray-500">To:</span>{' '}
+            {(msg.Destination.ToAddresses ?? []).join(', ')}
           </p>
-          {msg.Destination.CcAddresses.length > 0 && (
+          {(msg.Destination.CcAddresses ?? []).length > 0 && (
             <p>
               <span className="text-gray-500">CC:</span> {msg.Destination.CcAddresses.join(', ')}
+            </p>
+          )}
+          {(msg.Destination.BccAddresses ?? []).length > 0 && (
+            <p>
+              <span className="text-gray-500">BCC:</span> {msg.Destination.BccAddresses.join(', ')}
             </p>
           )}
           <p>
@@ -104,7 +110,7 @@ export default function SesInbox() {
               </span>
             </div>
             <div className="mt-1 truncate text-xs text-gray-400">
-              {msg.Source} &rarr; {msg.Destination.ToAddresses.join(', ')}
+              {msg.Source} &rarr; {(msg.Destination.ToAddresses ?? []).join(', ')}
             </div>
           </button>
         ))}

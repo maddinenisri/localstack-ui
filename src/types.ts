@@ -33,7 +33,7 @@ export interface SnsEndpointMessage {
 }
 
 export interface SnsSmsResponse {
-  sms_messages: SnsSmsMessage[]
+  sms_messages: Record<string, SnsSmsMessage[]> | SnsSmsMessage[]
 }
 
 export interface SnsSmsMessage {

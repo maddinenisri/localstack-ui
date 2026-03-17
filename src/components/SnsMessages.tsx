@@ -1,60 +1,90 @@
-import { useState } from 'react'
-import { usePolling } from '../hooks/usePolling'
-import { fetchSnsPlatformMessages, fetchSnsSmsMessages } from '../api'
-
-interface FlatMessage {
-  id: string
-  type: 'platform' | 'sms'
-  target: string
-  message: string
-  subject?: string
-  attributes: Record<string, unknown>
-}
+import { useState, useEffect, useRef } from 'react'
+import {
+  ensureInspectorQueue,
+  listSnsTopics,
+  subscribeQueueToTopic,
+  getQueueArn,
+  receiveMessages,
+  type SnsPublishedMessage,
+} from '../api'
 
 export default function SnsMessages() {
-  const {
-    data: platformData,
-    error: platformErr,
-    loading: platformLoading,
-  } = usePolling(fetchSnsPlatformMessages, 5000)
-  const {
-    data: smsData,
-    error: smsErr,
-    loading: smsLoading,
-  } = usePolling(fetchSnsSmsMessages, 5000)
+  const [messages, setMessages] = useState<SnsPublishedMessage[]>([])
+  const [topics, setTopics] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [ready, setReady] = useState(false)
+  const queueUrlRef = useRef('')
 
-  const loading = platformLoading || smsLoading
-  const error = platformErr || smsErr
+  // Set up the inspector queue and subscribe to all topics
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const queueUrl = await ensureInspectorQueue()
+        if (cancelled) return
+        queueUrlRef.current = queueUrl
 
-  const messages: FlatMessage[] = []
+        const queueArn = await getQueueArn(queueUrl)
+        const topicArns = await listSnsTopics()
+        if (cancelled) return
+        setTopics(topicArns)
 
-  if (platformData?.platform_endpoint_messages) {
-    for (const [arn, msgs] of Object.entries(platformData.platform_endpoint_messages)) {
-      msgs.forEach((msg, i) => {
-        messages.push({
-          id: `platform-${arn}-${i}`,
-          type: 'platform',
-          target: msg.TargetArn || arn,
-          message: msg.Message,
-          subject: msg.Subject,
-          attributes: msg.MessageAttributes,
-        })
-      })
+        for (const arn of topicArns) {
+          await subscribeQueueToTopic(arn, queueArn)
+        }
+        if (cancelled) return
+        setError(null)
+        setReady(true)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
     }
-  }
+  }, [])
 
-  if (smsData?.sms_messages) {
-    smsData.sms_messages.forEach((msg, i) => {
-      messages.push({
-        id: `sms-${i}`,
-        type: 'sms',
-        target: msg.PhoneNumber,
-        message: msg.Message,
-        attributes: msg.MessageAttributes,
-      })
-    })
-  }
+  // Poll for new messages once ready
+  useEffect(() => {
+    if (!ready) return
+
+    const poll = async () => {
+      const queueUrl = queueUrlRef.current
+      if (!queueUrl) return
+      try {
+        const newMsgs = await receiveMessages(queueUrl)
+        if (newMsgs.length > 0) {
+          setMessages((prev) => [...newMsgs, ...prev])
+        }
+
+        // Re-check for new topics
+        const topicArns = await listSnsTopics()
+        setTopics((prev) => {
+          if (topicArns.length !== prev.length) {
+            // Subscribe new topics in background
+            getQueueArn(queueUrl).then((queueArn) => {
+              for (const arn of topicArns) {
+                subscribeQueueToTopic(arn, queueArn).catch(() => {})
+              }
+            })
+            return topicArns
+          }
+          return prev
+        })
+      } catch (err) {
+        console.error('SNS poll error:', err)
+      }
+    }
+
+    // Poll immediately, then every 3s
+    poll()
+    const timer = setInterval(poll, 3000)
+    return () => clearInterval(timer)
+  }, [ready])
 
   return (
     <section>
@@ -65,6 +95,18 @@ export default function SnsMessages() {
             {messages.length}
           </span>
         </h2>
+        {topics.length > 0 && (
+          <div className="hidden gap-1.5 sm:flex">
+            {topics.map((arn) => (
+              <span
+                key={arn}
+                className="rounded bg-purple-900/50 px-2 py-0.5 text-xs text-purple-300"
+              >
+                {arn.split(':').pop()}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {loading && <p className="text-sm text-gray-500">Loading...</p>}
@@ -74,50 +116,56 @@ export default function SnsMessages() {
         <div className="rounded-lg border border-dashed border-gray-800 py-8 text-center text-sm text-gray-600">
           No SNS messages yet. Publish via{' '}
           <code className="rounded bg-gray-800 px-1 text-xs">aws sns publish</code>
+          {topics.length > 0 && (
+            <p className="mt-2 text-xs text-gray-700">
+              Listening on {topics.length} topic{topics.length > 1 ? 's' : ''} via SQS inspector
+              queue
+            </p>
+          )}
         </div>
       )}
 
       <div className="space-y-2">
-        {messages.map((msg) => (
+        {messages.map((msg, i) => (
           <div
-            key={msg.id}
+            key={`${msg.messageId}-${i}`}
             className="overflow-hidden rounded-lg border border-gray-800 bg-gray-900"
           >
             <button
-              onClick={() => setExpanded(expanded === msg.id ? null : msg.id)}
+              onClick={() =>
+                setExpanded(expanded === `${msg.messageId}-${i}` ? null : `${msg.messageId}-${i}`)
+              }
               className="w-full p-3 text-left transition-colors hover:bg-gray-800"
             >
               <div className="flex items-baseline justify-between gap-4">
                 <div className="flex items-center gap-2">
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                      msg.type === 'sms'
-                        ? 'bg-blue-900 text-blue-300'
-                        : 'bg-purple-900 text-purple-300'
-                    }`}
-                  >
-                    {msg.type === 'sms' ? 'SMS' : 'PUSH'}
+                  <span className="rounded bg-purple-900 px-1.5 py-0.5 text-xs font-medium text-purple-300">
+                    {msg.topicArn.split(':').pop() || 'SNS'}
                   </span>
                   <span className="truncate text-sm text-white">
                     {msg.subject || msg.message.slice(0, 80)}
                   </span>
                 </div>
+                {msg.timestamp && (
+                  <span className="text-xs whitespace-nowrap text-gray-500">
+                    {new Date(msg.timestamp).toLocaleTimeString()}
+                  </span>
+                )}
               </div>
-              <div className="mt-1 truncate text-xs text-gray-400">Target: {msg.target}</div>
             </button>
-            {expanded === msg.id && (
+            {expanded === `${msg.messageId}-${i}` && (
               <div className="space-y-2 border-t border-gray-800 p-3">
+                <div className="space-y-1 text-xs text-gray-400">
+                  <p>
+                    <span className="text-gray-500">Topic:</span> {msg.topicArn}
+                  </p>
+                  <p>
+                    <span className="text-gray-500">Message ID:</span> {msg.messageId}
+                  </p>
+                </div>
                 <pre className="rounded bg-gray-800 p-3 text-sm break-all whitespace-pre-wrap text-gray-200">
                   {tryFormatJson(msg.message)}
                 </pre>
-                {Object.keys(msg.attributes).length > 0 && (
-                  <div>
-                    <p className="mb-1 text-xs text-gray-500">Attributes:</p>
-                    <pre className="rounded bg-gray-800 p-2 text-xs text-gray-300">
-                      {JSON.stringify(msg.attributes, null, 2)}
-                    </pre>
-                  </div>
-                )}
               </div>
             )}
           </div>

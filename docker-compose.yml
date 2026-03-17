@@ -1,0 +1,26 @@
+services:
+  localstack:
+    image: localstack/localstack:latest
+    environment:
+      - SERVICES=ses,sns,sqs
+      - DEBUG=0
+      - AWS_DEFAULT_REGION=us-east-1
+    ports:
+      - '14566:4566'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:4566/_localstack/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ui:
+    build: .
+    ports:
+      - '8080:8080'
+    depends_on:
+      localstack:
+        condition: service_healthy
+    # Override nginx upstream to point to the localstack service
+    # instead of localhost (separate containers, not a shared pod)
+    volumes:
+      - ./nginx-compose.conf:/etc/nginx/conf.d/localstack-ui.conf:ro
